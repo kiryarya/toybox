@@ -1,0 +1,11 @@
+{
+  "id": "toybox",
+  "name": "Toybox",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "A growing Obsidian toolkit, starting with URL opening helpers.",
+  "author": "kiryarya",
+  "authorUrl": "https://github.com/kiryarya",
+  "fundingUrl": "",
+  "isDesktopOnly": false
+}
