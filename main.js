@@ -32,6 +32,49 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var VIEW_TYPE_TOYBOX_WEBVIEW = "toybox-webview";
 var FALLBACK_URL = "about:blank";
+var DEFAULT_SETTINGS = {
+  urlOpenerEnabled: true,
+  twitterEmbedPasteEnabled: true,
+  mermaidEnhancerEnabled: true,
+  mermaidDefaultZoom: 1,
+  mermaidZoomStep: 0.1
+};
+var TRANSLATIONS = {
+  en: {
+    webViewName: "Toybox Web Viewer",
+    electronShellUnavailable: "Toybox: Electron shell is unavailable; could not open external browser.",
+    zoomOut: "Zoom out",
+    resetZoom: "Reset zoom",
+    zoomIn: "Zoom in",
+    urlOpenerName: "URL opener",
+    urlOpenerDesc: "Left-click HTTP(S) links in Obsidian web views and middle-click them in the default browser.",
+    twitterEmbedPasteName: "Twitter embed paste",
+    twitterEmbedPasteDesc: "Convert pasted Twitter/X post links to Obsidian tweet embeds.",
+    mermaidEnhancerName: "Mermaid enhancer",
+    mermaidEnhancerDesc: "Add zoom controls and scrollable viewports to rendered Mermaid diagrams.",
+    mermaidDefaultZoomName: "Default Mermaid zoom",
+    mermaidDefaultZoomDesc: "Initial zoom level for enhanced Mermaid diagrams.",
+    mermaidZoomStepName: "Mermaid zoom step",
+    mermaidZoomStepDesc: "How much each zoom button or Ctrl+mouse wheel action changes the scale."
+  },
+  ja: {
+    webViewName: "Toybox Web \u30D3\u30E5\u30FC\u30A2\u30FC",
+    electronShellUnavailable: "Toybox: Electron shell \u3092\u5229\u7528\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5916\u90E8\u30D6\u30E9\u30A6\u30B6\u3092\u958B\u3051\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
+    zoomOut: "\u7E2E\u5C0F",
+    resetZoom: "\u30BA\u30FC\u30E0\u3092\u30EA\u30BB\u30C3\u30C8",
+    zoomIn: "\u62E1\u5927",
+    urlOpenerName: "URL \u30AA\u30FC\u30D7\u30CA\u30FC",
+    urlOpenerDesc: "Obsidian \u5185\u306E Web \u30D3\u30E5\u30FC\u3067\u306F HTTP(S) \u30EA\u30F3\u30AF\u3092\u5DE6\u30AF\u30EA\u30C3\u30AF\u3067\u958B\u304D\u3001\u4E2D\u30AF\u30EA\u30C3\u30AF\u3067\u65E2\u5B9A\u306E\u30D6\u30E9\u30A6\u30B6\u306B\u9001\u308A\u307E\u3059\u3002",
+    twitterEmbedPasteName: "Twitter \u57CB\u3081\u8FBC\u307F\u8CBC\u308A\u4ED8\u3051",
+    twitterEmbedPasteDesc: "\u8CBC\u308A\u4ED8\u3051\u305F Twitter/X \u306E\u6295\u7A3F\u30EA\u30F3\u30AF\u3092 Obsidian \u306E\u30C4\u30A4\u30FC\u30C8\u57CB\u3081\u8FBC\u307F\u306B\u5909\u63DB\u3057\u307E\u3059\u3002",
+    mermaidEnhancerName: "Mermaid \u62E1\u5F35",
+    mermaidEnhancerDesc: "\u30EC\u30F3\u30C0\u30EA\u30F3\u30B0\u6E08\u307F Mermaid \u56F3\u306B\u30BA\u30FC\u30E0\u64CD\u4F5C\u3068\u30B9\u30AF\u30ED\u30FC\u30EB\u53EF\u80FD\u306A\u8868\u793A\u9818\u57DF\u3092\u8FFD\u52A0\u3057\u307E\u3059\u3002",
+    mermaidDefaultZoomName: "Mermaid \u306E\u65E2\u5B9A\u30BA\u30FC\u30E0",
+    mermaidDefaultZoomDesc: "\u62E1\u5F35\u3055\u308C\u305F Mermaid \u56F3\u306E\u521D\u671F\u30BA\u30FC\u30E0\u500D\u7387\u3067\u3059\u3002",
+    mermaidZoomStepName: "Mermaid \u306E\u30BA\u30FC\u30E0\u5E45",
+    mermaidZoomStepDesc: "\u30BA\u30FC\u30E0\u30DC\u30BF\u30F3\u307E\u305F\u306F Ctrl+\u30DE\u30A6\u30B9\u30DB\u30A4\u30FC\u30EB\u3067\u500D\u7387\u3092\u5909\u3048\u308B\u91CF\u3067\u3059\u3002"
+  }
+};
 var WebView = class extends import_obsidian.ItemView {
   constructor(leaf) {
     super(leaf);
@@ -44,7 +87,7 @@ var WebView = class extends import_obsidian.ItemView {
     try {
       return new URL(this.url).hostname;
     } catch (e) {
-      return "Toybox Web Viewer";
+      return t("webViewName");
     }
   }
   getState() {
@@ -76,20 +119,39 @@ var WebView = class extends import_obsidian.ItemView {
   }
 };
 var ToyboxPlugin = class extends import_obsidian.Plugin {
+  constructor() {
+    super(...arguments);
+    this.settings = DEFAULT_SETTINGS;
+    this.lastExternalOpen = null;
+  }
   async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new ToyboxSettingTab(this.app, this));
     this.registerView(VIEW_TYPE_TOYBOX_WEBVIEW, (leaf) => new WebView(leaf));
+    this.registerMarkdownPostProcessor((el) => this.watchMermaidBlocks(el));
+    this.registerEvent(
+      this.app.workspace.on(
+        "editor-paste",
+        (evt, editor) => this.handleEditorPaste(evt, editor)
+      )
+    );
     this.registerDomEvent(
       window,
       "mousedown",
       (evt) => {
+        if (!this.settings.urlOpenerEnabled) {
+          return;
+        }
         if (evt.button !== 1) {
           return;
         }
-        if (!this.getHttpUrlFromEvent(evt)) {
+        const url = this.getHttpUrlFromEvent(evt);
+        if (!url) {
           return;
         }
         evt.preventDefault();
         evt.stopImmediatePropagation();
+        void this.openInDefaultBrowser(url);
       },
       { capture: true }
     );
@@ -97,6 +159,29 @@ var ToyboxPlugin = class extends import_obsidian.Plugin {
       window,
       "auxclick",
       (evt) => {
+        if (!this.settings.urlOpenerEnabled) {
+          return;
+        }
+        if (evt.button !== 1) {
+          return;
+        }
+        const url = this.getHttpUrlFromEvent(evt);
+        if (!url) {
+          return;
+        }
+        evt.preventDefault();
+        evt.stopImmediatePropagation();
+        void this.openInDefaultBrowser(url);
+      },
+      { capture: true }
+    );
+    this.registerDomEvent(
+      window,
+      "mouseup",
+      (evt) => {
+        if (!this.settings.urlOpenerEnabled) {
+          return;
+        }
         if (evt.button !== 1) {
           return;
         }
@@ -114,6 +199,9 @@ var ToyboxPlugin = class extends import_obsidian.Plugin {
       window,
       "click",
       (evt) => {
+        if (!this.settings.urlOpenerEnabled) {
+          return;
+        }
         if (evt.button !== 0) {
           return;
         }
@@ -134,30 +222,155 @@ var ToyboxPlugin = class extends import_obsidian.Plugin {
   async onunload() {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_TOYBOX_WEBVIEW);
   }
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+  refreshMarkdownViews() {
+    this.app.workspace.updateOptions();
+  }
+  handleEditorPaste(evt, editor) {
+    var _a;
+    if (!this.settings.twitterEmbedPasteEnabled || evt.defaultPrevented) {
+      return;
+    }
+    const replacement = createTwitterEmbedMarkdown(
+      (_a = evt.clipboardData) == null ? void 0 : _a.getData("text/plain")
+    );
+    if (!replacement) {
+      return;
+    }
+    evt.preventDefault();
+    editor.replaceSelection(replacement, "paste");
+  }
+  watchMermaidBlocks(el) {
+    if (!this.settings.mermaidEnhancerEnabled) {
+      return;
+    }
+    this.enhanceMermaidBlocks(el);
+    window.requestAnimationFrame(() => this.enhanceMermaidBlocks(el));
+    window.setTimeout(() => this.enhanceMermaidBlocks(el), 250);
+    const observer = new MutationObserver(() => this.enhanceMermaidBlocks(el));
+    observer.observe(el, {
+      childList: true,
+      subtree: true
+    });
+    this.register(() => observer.disconnect());
+  }
+  enhanceMermaidBlocks(el) {
+    el.querySelectorAll(".mermaid svg").forEach((svg) => {
+      const mermaidEl = svg.closest(".mermaid");
+      if (!mermaidEl || mermaidEl.dataset.toyboxMermaidEnhanced === "true") {
+        return;
+      }
+      this.enhanceMermaidBlock(mermaidEl, svg);
+    });
+  }
+  enhanceMermaidBlock(mermaidEl, svg) {
+    mermaidEl.dataset.toyboxMermaidEnhanced = "true";
+    mermaidEl.addClass("toybox-mermaid");
+    const toolbar = document.createElement("div");
+    toolbar.addClass("toybox-mermaid-toolbar");
+    const zoomOutButton = createToolbarButton("-", t("zoomOut"));
+    const zoomResetButton = createToolbarButton("100%", t("resetZoom"));
+    const zoomInButton = createToolbarButton("+", t("zoomIn"));
+    const viewport = document.createElement("div");
+    viewport.addClass("toybox-mermaid-viewport");
+    const scaler = document.createElement("div");
+    scaler.addClass("toybox-mermaid-scaler");
+    const svgSize = getSvgSize(svg);
+    mermaidEl.insertBefore(toolbar, svg);
+    viewport.appendChild(scaler);
+    scaler.appendChild(svg);
+    mermaidEl.appendChild(viewport);
+    toolbar.appendChild(zoomOutButton);
+    toolbar.appendChild(zoomResetButton);
+    toolbar.appendChild(zoomInButton);
+    let zoom = clampZoom(this.settings.mermaidDefaultZoom);
+    const updateZoom = (nextZoom) => {
+      zoom = clampZoom(nextZoom);
+      scaler.style.width = `${svgSize.width * zoom}px`;
+      scaler.style.height = `${svgSize.height * zoom}px`;
+      svg.style.transform = `scale(${zoom})`;
+      zoomResetButton.setText(`${Math.round(zoom * 100)}%`);
+    };
+    this.registerDomEvent(
+      zoomOutButton,
+      "click",
+      () => updateZoom(zoom - this.settings.mermaidZoomStep)
+    );
+    this.registerDomEvent(
+      zoomResetButton,
+      "click",
+      () => updateZoom(this.settings.mermaidDefaultZoom)
+    );
+    this.registerDomEvent(
+      zoomInButton,
+      "click",
+      () => updateZoom(zoom + this.settings.mermaidZoomStep)
+    );
+    this.registerDomEvent(viewport, "wheel", (evt) => {
+      if (!evt.ctrlKey) {
+        return;
+      }
+      evt.preventDefault();
+      updateZoom(zoom + (evt.deltaY < 0 ? 1 : -1) * this.settings.mermaidZoomStep);
+    });
+    updateZoom(zoom);
+  }
   getHttpUrlFromEvent(evt) {
     var _a;
-    const anchor = this.findAnchor(evt);
-    return normalizeHttpUrl((_a = anchor == null ? void 0 : anchor.href) != null ? _a : anchor == null ? void 0 : anchor.getAttribute("href"));
-  }
-  findAnchor(evt) {
     if (evt.target instanceof Element) {
-      const anchor = evt.target.closest("a[href]");
-      if (anchor instanceof HTMLAnchorElement) {
-        return anchor;
+      const url = (_a = this.getHttpUrlFromLinkedElement(evt.target)) != null ? _a : this.getHttpUrlFromCodeMirrorLink(evt.target);
+      if (url) {
+        return url;
       }
     }
     for (const node of evt.composedPath()) {
-      if (node instanceof HTMLAnchorElement && node.href) {
-        return node;
+      if (!(node instanceof Element)) {
+        continue;
       }
-      if (node instanceof Element) {
-        const anchor = node.closest("a[href]");
-        if (anchor instanceof HTMLAnchorElement) {
-          return anchor;
-        }
+      const url = this.getHttpUrlFromLinkedElement(node);
+      if (url) {
+        return url;
       }
     }
     return null;
+  }
+  getHttpUrlFromLinkedElement(element) {
+    var _a, _b, _c;
+    const linkedElement = element.closest(
+      "a[href], [href], [data-href], [data-url]"
+    );
+    if (linkedElement) {
+      const url = normalizeHttpUrl(
+        linkedElement instanceof HTMLAnchorElement ? linkedElement.href : (_b = (_a = linkedElement.getAttribute("href")) != null ? _a : linkedElement.getAttribute("data-href")) != null ? _b : linkedElement.getAttribute("data-url")
+      );
+      if (url) {
+        return url;
+      }
+    }
+    const propertyLink = element.closest(
+      ".metadata-link, .metadata-link-inner, .external-link"
+    );
+    if (propertyLink) {
+      const url = normalizeHttpUrl((_c = propertyLink.textContent) == null ? void 0 : _c.trim());
+      if (url) {
+        return url;
+      }
+    }
+    return null;
+  }
+  getHttpUrlFromCodeMirrorLink(element) {
+    const codeMirrorLink = element.closest(
+      ".cm-url, .cm-hmd-external-link, .cm-formatting-link-string"
+    );
+    if (!codeMirrorLink) {
+      return null;
+    }
+    return findHttpUrlInText(codeMirrorLink.textContent);
   }
   async openInObsidian(url) {
     const leaf = this.app.workspace.getLeaf("tab");
@@ -169,9 +382,18 @@ var ToyboxPlugin = class extends import_obsidian.Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
   async openInDefaultBrowser(url) {
+    const now = Date.now();
+    if (this.lastExternalOpen && this.lastExternalOpen.url === url && now - this.lastExternalOpen.time < 500) {
+      return;
+    }
+    this.lastExternalOpen = { url, time: now };
     const shell = this.getElectronShell();
     if (shell) {
       await shell.openExternal(url);
+      return;
+    }
+    if (import_obsidian.Platform.isDesktopApp) {
+      new import_obsidian.Notice(t("electronShellUnavailable"));
       return;
     }
     window.open(url, "_blank", "noopener");
@@ -181,14 +403,121 @@ var ToyboxPlugin = class extends import_obsidian.Plugin {
     if (!import_obsidian.Platform.isDesktopApp) {
       return null;
     }
-    try {
-      const electron = require("electron");
-      return (_a = electron.shell) != null ? _a : null;
-    } catch (e) {
-      return null;
+    const loaders = [
+      window.require,
+      typeof require === "function" ? require : null
+    ];
+    for (const loadElectron of loaders) {
+      if (!loadElectron) {
+        continue;
+      }
+      try {
+        const electron = loadElectron("electron");
+        if ((_a = electron.shell) == null ? void 0 : _a.openExternal) {
+          return electron.shell;
+        }
+      } catch (e) {
+        continue;
+      }
     }
+    return null;
   }
 };
+var ToyboxSettingTab = class extends import_obsidian.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "Toybox" });
+    new import_obsidian.Setting(containerEl).setName(t("urlOpenerName")).setDesc(t("urlOpenerDesc")).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.urlOpenerEnabled).onChange(async (value) => {
+        this.plugin.settings.urlOpenerEnabled = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName(t("twitterEmbedPasteName")).setDesc(t("twitterEmbedPasteDesc")).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.twitterEmbedPasteEnabled).onChange(async (value) => {
+        this.plugin.settings.twitterEmbedPasteEnabled = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName(t("mermaidEnhancerName")).setDesc(t("mermaidEnhancerDesc")).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.mermaidEnhancerEnabled).onChange(async (value) => {
+        this.plugin.settings.mermaidEnhancerEnabled = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshMarkdownViews();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName(t("mermaidDefaultZoomName")).setDesc(t("mermaidDefaultZoomDesc")).addSlider(
+      (slider) => slider.setLimits(0.5, 2, 0.1).setDynamicTooltip().setValue(this.plugin.settings.mermaidDefaultZoom).onChange(async (value) => {
+        this.plugin.settings.mermaidDefaultZoom = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName(t("mermaidZoomStepName")).setDesc(t("mermaidZoomStepDesc")).addSlider(
+      (slider) => slider.setLimits(0.05, 0.5, 0.05).setDynamicTooltip().setValue(this.plugin.settings.mermaidZoomStep).onChange(async (value) => {
+        this.plugin.settings.mermaidZoomStep = value;
+        await this.plugin.saveSettings();
+      })
+    );
+  }
+};
+function t(key) {
+  return TRANSLATIONS[getPreferredLanguage()][key];
+}
+function getPreferredLanguage() {
+  var _a;
+  const languages = [
+    document.documentElement.lang,
+    ...Array.from((_a = navigator.languages) != null ? _a : []),
+    navigator.language
+  ];
+  return languages.some((language) => language.toLowerCase().startsWith("ja")) ? "ja" : "en";
+}
+function createToolbarButton(text, label) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.addClass("clickable-icon");
+  button.addClass("toybox-mermaid-button");
+  button.setText(text);
+  button.setAttribute("aria-label", label);
+  button.setAttribute("title", label);
+  return button;
+}
+function clampZoom(zoom) {
+  return Math.min(3, Math.max(0.25, zoom));
+}
+function getSvgSize(svg) {
+  var _a, _b;
+  const viewBox = svg.viewBox.baseVal;
+  if (viewBox.width > 0 && viewBox.height > 0) {
+    return {
+      width: viewBox.width,
+      height: viewBox.height
+    };
+  }
+  const rect = svg.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    return {
+      width: rect.width,
+      height: rect.height
+    };
+  }
+  return {
+    width: (_a = readSvgLength(svg.getAttribute("width"))) != null ? _a : 800,
+    height: (_b = readSvgLength(svg.getAttribute("height"))) != null ? _b : 600
+  };
+}
+function readSvgLength(value) {
+  if (!value) {
+    return null;
+  }
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 function normalizeHttpUrl(url) {
   if (!url) {
     return null;
@@ -202,6 +531,49 @@ function normalizeHttpUrl(url) {
   } catch (e) {
     return null;
   }
+}
+function createTwitterEmbedMarkdown(text) {
+  const url = normalizeTwitterStatusUrl(text);
+  return url ? `![](${url})` : null;
+}
+function normalizeTwitterStatusUrl(text) {
+  const value = text == null ? void 0 : text.trim();
+  if (!value || /\s/.test(value)) {
+    return null;
+  }
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(value);
+  } catch (e) {
+    return null;
+  }
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    return null;
+  }
+  const hostname = parsedUrl.hostname.toLowerCase();
+  if (!isTwitterHost(hostname)) {
+    return null;
+  }
+  const parts = parsedUrl.pathname.split("/").filter(Boolean);
+  if (parts.length < 3 || parts[1].toLowerCase() !== "status") {
+    return null;
+  }
+  const username = parts[0];
+  const tweetId = parts[2];
+  if (!username || !/^\d+$/.test(tweetId)) {
+    return null;
+  }
+  return `https://twitter.com/${username}/status/${tweetId}`;
+}
+function isTwitterHost(hostname) {
+  return hostname === "twitter.com" || hostname === "www.twitter.com" || hostname === "mobile.twitter.com" || hostname === "x.com" || hostname === "www.x.com";
+}
+function findHttpUrlInText(text) {
+  const match = text == null ? void 0 : text.match(/https?:\/\/[^\s<>"']+/);
+  if (!match) {
+    return null;
+  }
+  return normalizeHttpUrl(match[0].replace(/[),.;\]]+$/, ""));
 }
 function readUrlFromState(state) {
   if (!state || typeof state !== "object") {
